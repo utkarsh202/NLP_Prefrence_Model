@@ -34,7 +34,8 @@ NLP_Preference_Model/
 │   └── 02_results.py                   <- Script to compile results tables and render paper plots
 │
 ├── report/                        <- Complete Submission Course Report & Paper
-│   ├── report.pdf                 <- Compiled camera-ready PDF report
+│   ├── project_report.pdf         <- Compiled camera-ready PDF course report
+│   ├── report.pdf                 <- Camera-ready PDF report
 │   └── figures/                   <- High-res vector PDF & raster figures
 │
 ├── src/                           <- Modular, clean, production-grade source code
@@ -98,7 +99,7 @@ NLP_Preference_Model/
 
 ## Step-by-Step Directions to Explore the Codebase
 
-You can explore the project through four different pathways:
+You can explore the project through three different pathways:
 
 ### Pathway 1: Explore Precomputed Results & Scientific Findings (Fastest, No GPU Needed)
 All 36 experiment configurations are pre-calculated with exact bootstrap confidence intervals and statistical tests.
