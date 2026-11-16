@@ -33,16 +33,8 @@ NLP_Preference_Model/
 │   ├── 01_eda.py                       <- Batch script for generating EDA statistics
 │   └── 02_results.py                   <- Script to compile results tables and render paper plots
 │
-├── demo/                          <- Interactive Demo & REST API
-│   ├── app.py                     <- Interactive Streamlit demo with bias meters
-│   └── api.py                     <- FastAPI preference prediction endpoint
-│
 ├── report/                        <- Complete Submission Course Report & Paper
 │   ├── report.pdf                 <- Compiled camera-ready PDF report
-│   ├── report.tex                 <- ACL formatted 2-column paper source
-│   ├── project_report.tex         <- IIT Bhilai course report source
-│   ├── references.bib             <- Complete BibTeX citations
-│   ├── acl.sty / acl_natbib.bst   <- Conference style files
 │   └── figures/                   <- High-res vector PDF & raster figures
 │
 ├── src/                           <- Modular, clean, production-grade source code
@@ -129,23 +121,8 @@ If you want to walk through the project interactively cell-by-cell:
    - Demonstrates the fine-tuning workflow of `microsoft/deberta-v3-base` on HH-RLHF.
    - Includes live `tqdm` countdown bars, gradient accumulation, and swap-test validation.
 
-### Pathway 3: Launch the Interactive Streamlit Demo
-We provide an interactive UI allowing users to input any prompt, provide two candidate completions, and inspect:
-- The predicted winner and temperature-calibrated preference probability $P(A \succ B)$.
-- The **Positional Bias Meter**: Displays both forward $P(A \mid A,B)$ and swapped $P(A \mid B,A)$ probabilities. Flags the pair if the decision flips based on presentation order.
-- The **Verbosity Alert**: Warns if the preferred answer is substantially longer, noting the probability of length bias.
-- The **Token Truncation Check**: Confirms whether any text exceeded the 512-token context window.
 
-To launch the demo locally:
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Launch Streamlit UI
-streamlit run demo/app.py
-```
-
-### Pathway 4: End-to-End CLI Reproduction
+### Pathway 3: End-to-End CLI Reproduction
 To re-run any individual experiment from the command line:
 
 ```bash
