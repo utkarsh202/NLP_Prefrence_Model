@@ -21,30 +21,14 @@ This project audits a 7-tier cascade of preference models (from a 1-parameter le
 ## Project Repository Map
 
 ```
-NLP_Preference_Modeling_Submission/
+NLP_Preference_Model/
 ├── README.md                      <- Master project guidebook & exploration directions (this file)
 ├── requirements.txt               <- Core dependencies
 ├── requirements-lock.txt          <- Exact frozen environment versions
-├── project_report_latex.zip       <- Complete LaTeX source package with figures for Overleaf
-│
-├── report/                        <- Project Report sources & compiled figures
-│   ├── project_report.tex         <- Standard, formal Academic Project Report in LaTeX
-│   ├── references.bib             <- Complete BibTeX bibliography (25+ cited papers)
-│   ├── acl_natbib.bst             <- Bibliography styling file
-│   ├── project_report_latex.zip   <- Standalone LaTeX zip archive
-│   └── figures/                   <- Publication-grade figures (PDF & high-res PNG)
-│       ├── fig1_accuracy_ladder.pdf
-│       ├── fig2_swap_consistency.pdf
-│       ├── fig3_reliability_shp.pdf
-│       ├── fig4_rq3_kl_hard_vs_soft.pdf
-│       ├── fig5_length_bias_test_b.pdf
-│       └── fig6_domain_shift.pdf
-│
 ├── notebooks/                     <- Interactive Jupyter & Python Notebooks
-│   ├── 01_EDA_and_Preprocessing.ipynb  <- Visual EDA, token budget profiling, and quality gating (Fully Executed)
-│   ├── 02_Baselines.ipynb              <- T0 TF-IDF, length heuristics, and OpenAssistant eval (Fully Executed)
-│   ├── 03_Train_DeBERTa_Hard.ipynb     <- DeBERTa-v3 fine-tuning with training progress & metrics (Fully Executed)
-│   ├── 04_Master_Results_and_Figures.ipynb <- Master analysis, all 8 tables & 6 publication plots (Fully Executed)
+│   ├── 01_EDA_and_Preprocessing.ipynb  <- Visual EDA, token budget profiling, and quality gating
+│   ├── 02_Baselines.ipynb              <- T0 TF-IDF, length heuristics, and OpenAssistant eval
+│   ├── 03_Train_DeBERTa_Hard.ipynb     <- DeBERTa-v3 fine-tuning with live tqdm progress bars
 │   ├── 01_eda.py                       <- Batch script for generating EDA statistics
 │   └── 02_results.py                   <- Script to compile results tables and render paper plots
 │
@@ -97,11 +81,6 @@ NLP_Preference_Modeling_Submission/
 │   ├── bert_bi.yaml               <- Siamese bi-encoder config
 │   └── deberta_large.yaml         <- Large-scale configuration
 │
-├── demo/                          <- Interactive Web Application & API
-│   ├── app.py                     <- Streamlit interactive UI with bias check meters
-│   ├── predictor.py               <- Symmetrized & temperature-calibrated inference engine
-│   └── api.py                     <- FastAPI endpoint for programmatic preference scoring
-│
 └── scripts/                       <- Automation & queue execution scripts
     ├── run_week2.sh               <- Baselines & initial BERT pipeline
     ├── run_week3.sh               <- Soft-label DeBERTa on SHP
@@ -122,7 +101,6 @@ All 36 experiment configurations are pre-calculated with exact bootstrap confide
 - **Inspect Soft vs. Hard Calibration (Table 2):** Open [`results/tables/table2_shp_soft_vs_hard.md`](results/tables/table2_shp_soft_vs_hard.md).
 - **Inspect Length Compression Test (Table 5):** Open [`results/tables/table5_test_b_length.md`](results/tables/table5_test_b_length.md).
 - **Inspect Statistical Significance Tests:** Open [`results/tables/table7_significance.md`](results/tables/table7_significance.md) or [`results/significance.csv`](results/significance.csv).
-- **Inspect High-Resolution Figures:** Browse the generated vector graphics in [`report/figures/`](report/figures/).
 
 ### Pathway 2: Interactive Exploration via Jupyter Notebooks
 If you want to walk through the project interactively cell-by-cell:
@@ -136,10 +114,7 @@ If you want to walk through the project interactively cell-by-cell:
    - Proves 100% swap-consistency mathematically and plots reliability diagrams.
 3. **Notebook 03 (`notebooks/03_Train_DeBERTa_Hard.ipynb`):**
    - Demonstrates the fine-tuning workflow of `microsoft/deberta-v3-base` on HH-RLHF.
-   - Includes training progress, loss curves, validation steps, and the swap-test showing the emergence of positional bias.
-4. **Notebook 04 (`notebooks/04_Master_Results_and_Figures.ipynb`):**
-   - Compiles and presents the master results across all 36 models and baselines.
-   - Renders all 8 empirical tables and all 6 publication-grade figures (Accuracy Ladder, Swap Consistency, Reliability Diagrams, Soft vs Hard KL Divergence, Length Sensitivity, and OOD Generalization).
+   - Includes live `tqdm` countdown bars, gradient accumulation, and swap-test validation.
 
 ### Pathway 3: Launch the Interactive Streamlit Demo
 We provide an interactive UI allowing users to input any prompt, provide two candidate completions, and inspect:
@@ -153,12 +128,7 @@ To launch the demo locally:
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Launch Streamlit
-streamlit run demo/app.py --server.port 8501
-```
-Then open `http://localhost:8501` in your web browser.
-
-### Pathway 4: End-to-End CLI Reproduction
+### Pathway : End-to-End CLI Reproduction
 To re-run any individual experiment from the command line:
 
 ```bash
@@ -203,12 +173,3 @@ The table below summarizes the headline findings evaluated on 6,194 Anthropic HH
 *All differences between DeBERTa-v3 and LLaMA-3-8B are statistically significant at $p < 0.001$ using a paired bootstrap test with 2,000 resamples.*
 
 ---
-
-## Academic Report & Submission Documents
-
-- **Full Project Report (LaTeX Source):** Located at [`report/project_report.tex`](report/project_report.tex).
-- **Report LaTeX Archive:** Download [`project_report_latex.zip`](project_report_latex.zip) containing the `.tex`, `.bib`, and `figures/` directory, ready to upload directly to Overleaf.
-- **Compiled Camera-Ready PDF:** [`report/report.pdf`](report/report.pdf).
-
----
-*Natural Language Processing Course Project — Indian Institute of Technology Bhilai (Autumn 2026)*
