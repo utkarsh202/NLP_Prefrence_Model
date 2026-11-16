@@ -82,7 +82,8 @@ def train(model, train_ds, val_ds, collate, ckpt_path, *, epochs=3, batch_size=3
         return state["bad"] >= patience
 
     step, t0, stop = 0, time.time(), False
-    torch.cuda.reset_peak_memory_stats()
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
     model.train()
     opt.zero_grad(set_to_none=True)
     for epoch in range(epochs):
@@ -117,8 +118,9 @@ def train(model, train_ds, val_ds, collate, ckpt_path, *, epochs=3, batch_size=3
     Path(ckpt_path).parent.mkdir(parents=True, exist_ok=True)
     torch.save({k: v.half() if v.is_floating_point() else v for k, v in model.state_dict().items()},
                ckpt_path)
+    peak_mem = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
     stats = {"train_time_min": (time.time() - t0) / 60, "best_val_loss": state["best"],
-             "optimizer_steps": step, "peak_gpu_mem_gb": torch.cuda.max_memory_allocated() / 1e9}
+             "optimizer_steps": step, "peak_gpu_mem_gb": peak_mem}
     tracking.log(stats)
     print({k: round(v, 4) for k, v in stats.items()}, f"-> {ckpt_path}")
     return model

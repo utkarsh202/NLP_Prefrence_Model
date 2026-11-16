@@ -57,8 +57,10 @@ def build_model(cfg, pretrained=True):
                      cfg.get("gradient_checkpointing", False) and pretrained, pretrained)
 
 
-def load_checkpoint(run_dir, device="cuda"):
+def load_checkpoint(run_dir, device=None):
     """Rebuild a trained model from checkpoints/<run_name>/ (config.yaml + model.pt)."""
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     run_dir = Path(run_dir)
     cfg = yaml.safe_load(open(run_dir / "config.yaml"))
     model = build_model(cfg, pretrained=False)

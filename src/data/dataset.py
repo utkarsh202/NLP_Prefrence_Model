@@ -57,6 +57,9 @@ def load_split(dataset, split, subset_size=None, seed=42):
             cols += ["subset"]
         df = pd.DataFrame(columns=cols)
 
+    if "uid" not in df.columns:
+        df["uid"] = [f"{dataset}_{split}_{i}" for i in range(len(df))]
+
     if subset_size and len(df) > subset_size:
         df = df.sample(n=subset_size, random_state=seed).reset_index(drop=True)
 

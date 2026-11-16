@@ -3,9 +3,7 @@ import argparse
 from pathlib import Path
 import random
 import pandas as pd
-import numpy as np
 from datasets import load_dataset
-from src.utils.tokenization import format_input
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,7 +33,7 @@ def preprocess_hh(split_name="helpful", out_dir=None, seed=42):
 
     for split in ["train", "test"]:
         records = []
-        for row in ds[split]:
+        for i, row in enumerate(ds[split]):
             pc, rc = extract_prompt_and_response(row["chosen"])
             pr, rr = extract_prompt_and_response(row["rejected"])
             prompt = pc if len(pc) > 0 else pr
@@ -47,6 +45,7 @@ def preprocess_hh(split_name="helpful", out_dir=None, seed=42):
                 ra, rb, label = rr, rc, 0.0
                 
             records.append({
+                "uid": f"hh_{split_name}_{split}_{i}",
                 "prompt": prompt,
                 "response_a": ra,
                 "response_b": rb,
@@ -86,6 +85,7 @@ def preprocess_shp(out_dir=None, seed=42):
                 continue
 
             records.append({
+                "uid": f"shp_{split}_{len(records)}",
                 "prompt": row.get("history", row.get("post", "")),
                 "response_a": row["human_ref_A"],
                 "response_b": row["human_ref_B"],
@@ -133,6 +133,7 @@ def preprocess_uf(out_dir=None, seed=42):
                 ra, rb, label = rejected, chosen, 0.0
 
             records.append({
+                "uid": f"uf_{split}_{len(records)}",
                 "prompt": prompt,
                 "response_a": str(ra),
                 "response_b": str(rb),
