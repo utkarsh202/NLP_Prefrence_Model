@@ -14,5 +14,8 @@ report/*.aux
 report/*.blg
 report/*.bbl
 report/*.out
+report/*.toc
+report/*.synctex.gz
 *.zip
-report/
+!project_report_latex.zip
+!report/project_report_latex.zip

@@ -29,8 +29,21 @@ NLP_Preference_Model/
 │   ├── 01_EDA_and_Preprocessing.ipynb  <- Visual EDA, token budget profiling, and quality gating
 │   ├── 02_Baselines.ipynb              <- T0 TF-IDF, length heuristics, and OpenAssistant eval
 │   ├── 03_Train_DeBERTa_Hard.ipynb     <- DeBERTa-v3 fine-tuning with live tqdm progress bars
+│   ├── 04_Master_Results_and_Figures.ipynb <- Master visualization of all 36 runs and research questions
 │   ├── 01_eda.py                       <- Batch script for generating EDA statistics
 │   └── 02_results.py                   <- Script to compile results tables and render paper plots
+│
+├── demo/                          <- Interactive Demo & REST API
+│   ├── app.py                     <- Interactive Streamlit demo with bias meters
+│   └── api.py                     <- FastAPI preference prediction endpoint
+│
+├── report/                        <- Complete Submission Course Report & Paper
+│   ├── report.pdf                 <- Compiled camera-ready PDF report
+│   ├── report.tex                 <- ACL formatted 2-column paper source
+│   ├── project_report.tex         <- IIT Bhilai course report source
+│   ├── references.bib             <- Complete BibTeX citations
+│   ├── acl.sty / acl_natbib.bst   <- Conference style files
+│   └── figures/                   <- High-res vector PDF & raster figures
 │
 ├── src/                           <- Modular, clean, production-grade source code
 │   ├── data/                      <- Dataset loading, streaming, and preprocessing
@@ -128,7 +141,11 @@ To launch the demo locally:
 # 1. Install dependencies
 pip install -r requirements.txt
 
-### Pathway : End-to-End CLI Reproduction
+# 2. Launch Streamlit UI
+streamlit run demo/app.py
+```
+
+### Pathway 4: End-to-End CLI Reproduction
 To re-run any individual experiment from the command line:
 
 ```bash

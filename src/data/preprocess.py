@@ -106,6 +106,53 @@ def preprocess_shp(out_dir=None, seed=42):
             df.to_parquet(out_dir / "test.parquet", index=False)
 
 
+def preprocess_uf(out_dir=None, seed=42):
+    rng = random.Random(seed)
+    ds = load_dataset("HuggingFaceH4/ultrafeedback_binarized")
+    out_dir = out_dir or (ROOT / "data/processed/ultrafeedback")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for split in ["train_prefs", "test_prefs"]:
+        records = []
+        target_split = ds[split] if split in ds else ds.get("train", [])
+        for row in target_split:
+            prompt = row.get("prompt", "")
+            chosen = row.get("chosen", "")
+            rejected = row.get("rejected", "")
+            
+            # Extract content if stored as chat message list
+            if isinstance(chosen, list) and len(chosen) > 0:
+                chosen = chosen[-1].get("content", str(chosen))
+            if isinstance(rejected, list) and len(rejected) > 0:
+                rejected = rejected[-1].get("content", str(rejected))
+
+            # 50/50 order randomization
+            if rng.randint(0, 1) == 1:
+                ra, rb, label = chosen, rejected, 1.0
+            else:
+                ra, rb, label = rejected, chosen, 0.0
+
+            records.append({
+                "prompt": prompt,
+                "response_a": str(ra),
+                "response_b": str(rb),
+                "label": label,
+                "p_a": float(label),
+                "len_a": len(str(ra).split()),
+                "len_b": len(str(rb).split()),
+                "subset": "ultrafeedback"
+            })
+
+        df = pd.DataFrame(records)
+        out_name = "train" if "train" in split else "test"
+        if out_name == "train":
+            val_n = min(4000, int(len(df) * 0.1))
+            df.iloc[val_n:].to_parquet(out_dir / "train.parquet", index=False)
+            df.iloc[:val_n].to_parquet(out_dir / "val.parquet", index=False)
+        else:
+            df.to_parquet(out_dir / "test.parquet", index=False)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Preprocess preference datasets.")
     parser.add_argument("--datasets", nargs="+", default=["hh", "shp", "hhh", "uf"],
@@ -118,6 +165,8 @@ def main():
         preprocess_hh("harmless-base", ROOT / "data/processed/hh_harmless")
     if "shp" in args.datasets:
         preprocess_shp()
+    if "uf" in args.datasets:
+        preprocess_uf()
 
     print("[SUCCESS] Preprocessing completed.")
 

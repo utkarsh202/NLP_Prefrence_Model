@@ -1,0 +1,435 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{times}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{fancyhdr}
+\usepackage{natbib}
+\usepackage{microtype}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=green!50!black,
+    urlcolor=blue!70!black
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small IIT Bhilai -- NLP Course Project Report}
+\lhead{\small Pairwise Preference Modeling for LLMs}
+\cfoot{\thepage}
+
+\begin{document}
+
+% =========================================================================
+% TITLE / COVER PAGE
+% =========================================================================
+\begin{titlepage}
+    \centering
+    \vspace*{0.5cm}
+    
+    {\Huge \bfseries Reliable Pairwise Preference Modeling\\[0.3cm] for LLM Responses \par}
+    \vspace{0.4cm}
+    {\LARGE \itshape An Empirical Investigation of Positional Bias, Verbosity Bias, and Calibration in RLHF Reward Models \par}
+    
+    \vspace{1.5cm}
+    {\large \textbf{Natural Language Processing Course Project Report} \par}
+    \vspace{0.2cm}
+    {\large Department of Computer Science and Engineering / Data Science \par}
+    {\large Indian Institute of Technology Bhilai \par}
+    
+    \vspace{1.5cm}
+    \textbf{\Large Project Group Members}\\[0.4cm]
+    \begin{table}[H]
+        \centering
+        \large
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{llc}
+            \toprule
+            \textbf{S. No.} & \textbf{Full Name} & \textbf{Registration Number} \\
+            \midrule
+            1 & \textbf{Utkarsh Shrivastava} & \texttt{P26CS005} \\
+            2 & \textbf{Ashish Sinha} & \texttt{P26DS002} \\
+            3 & \textbf{Anjali Patel} & \texttt{P26DS001} \\
+            4 & \textbf{Tanay Singh} & \texttt{12342230} \\
+            5 & \textbf{Amathul Sarah} & \texttt{12340210} \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vfill
+    {\large \textbf{Academic Term:} Autumn 2026 \par}
+    {\large \textbf{Submission Date:} November 2026 \par}
+    \vspace*{0.5cm}
+\end{titlepage}
+
+\newpage
+\tableofcontents
+\newpage
+
+% =========================================================================
+% EXECUTIVE SUMMARY
+% =========================================================================
+\begin{abstract}
+\noindent Pairwise preference models evaluate candidate language model outputs to judge which response human annotators would prefer. They serve as the critical reward signal for Reinforcement Learning from Human Feedback (RLHF) and the foundation of LLM-as-a-judge benchmarks. Traditionally, these models are evaluated almost exclusively by pairwise classification accuracy. In this work, we demonstrate that accuracy alone is deeply misleading: it conceals severe order-of-presentation bias, verbosity exploitation, and extreme confidence miscalibration. 
+
+We construct and rigorously audit a seven-tier cascade of preference models---spanning a length heuristic, TF-IDF + Logistic Regression, BiLSTM (cross and Siamese), BERT-base cross-encoder and bi-encoder, DeBERTa-v3-base cross-encoder, deep ensembles, and an 8-Billion parameter few-shot LLaMA-3-8B judge. Evaluating across 6,194 Anthropic HH-RLHF helpful pairs and 18,406 Stanford Human Preferences (SHP) pairs, we find:
+\begin{enumerate}
+    \item \textbf{Small Encoders Outperform Massive LLM Judges:} A fine-tuned 184M-parameter DeBERTa-v3 ensemble outperforms the 8B LLaMA-3 judge by 4.7 percentage points (66.5\% vs.\ 61.9\%, $p < 0.001$) and is dramatically better calibrated ($\text{ECE} = 0.039$ vs.\ $0.313$).
+    \item \textbf{Positional Bias Permeates Joint Attention:} Every cross-encoder model flips its decision on 14\% to 23\% of pairs simply when the presentation order of responses is reversed. Data augmentation during training fails to resolve this ($p = 0.10$, n.s.), whereas inference-time symmetrization completely restores order-invariance and yields an extra $+1.0$ point accuracy gain ($p < 0.05$). A bi-encoder architecture achieves identical accuracy (64.6\%) while being order-invariant by mathematical construction.
+    \item \textbf{Verbosity Bias Survives Across Architectures:} In a controlled 500-pair compression study (Test B), all architectures systematically prefer the longer of two identical-content answers 59\% to 68\% of the time, penalizing conciseness.
+    \item \textbf{Soft Labels Provide Calibration Without Accuracy Loss:} Training on collective human upvote ratios from SHP rather than collapsed hard binary labels cuts Expected Calibration Error (ECE) by $3\times$ to $4.5\times$ and reduces divergence from human vote distributions by 36\% to 60\% across all model sizes.
+\end{enumerate}
+Our results establish that reliable preference modeling requires active architectural symmetrization and distributional soft-label supervision.
+\end{abstract}
+
+\newpage
+
+% =========================================================================
+% 1. INTRODUCTION
+% =========================================================================
+\section{Introduction and Motivation}
+
+Aligning Large Language Models (LLMs) with human values, intent, and safety requirements is one of the foundational challenges of modern NLP. Reinforcement Learning from Human Feedback \citep[RLHF;][]{christiano2017deep,ouyang2022training,bai2022training} has emerged as the standard engineering methodology for this alignment. At the core of the RLHF pipeline lies the \textbf{Reward Model} (or Preference Model), which approximates the latent human preference function:
+\begin{equation}
+    P(y_A \succ y_B \mid x) = \sigma(r(x, y_A) - r(x, y_B))
+\end{equation}
+where $x$ is the user prompt, and $y_A, y_B$ are candidate model completions.
+
+In academic leaderboards and production deployments \citep[e.g., RewardBench;][]{lambert2024rewardbench}, preference models are ranked primarily by **pairwise accuracy** on held-out test splits. However, accuracy treats every prediction as a scalar binary hit or miss, completely ignoring:
+\begin{itemize}
+    \item \textbf{Order Sensitivity:} Does the model predict response A simply because it was presented first?
+    \item \textbf{Verbosity Exploitation:} Does the model reward unnecessary filler words and padding over concise, high-density reasoning?
+    \item \textbf{Uncertainty Calibration:} When two annotators disagree 50/50, does the model express calibrated uncertainty ($\hat{p} \approx 0.50$), or does it output overconfident probabilities ($\hat{p} \approx 0.99$)?
+\end{itemize}
+
+When an overconfident or position-biased reward model is used in Proximal Policy Optimization (PPO), it provides noisy, distorted gradients. This causes the generative policy to "hack" the reward model---producing verbose, repetitive, or structurally biased text that scores high on automated metrics while degrading real human satisfaction.
+
+This project treats the preference model not as a black box to maximize accuracy, but as a scientific instrument to be audited. We investigate whether small, specialized encoders can outperform giant LLMs, quantify how deeply non-content biases distort decisions, and evaluate whether soft distributional targets can fix model overconfidence.
+
+% =========================================================================
+% 2. RESEARCH QUESTIONS
+% =========================================================================
+\section{Research Questions and Hypotheses}
+
+We formalize our investigation around three primary Research Questions (RQs):
+
+\paragraph{RQ1: Model Scale vs.\ Domain Specialization.}
+\emph{Can a small, fine-tuned transformer encoder (110M--184M parameters) predict human pairwise preferences as accurately and reliably as an 8-Billion parameter prompted LLM judge?}
+\begin{itemize}
+    \item \textbf{Hypothesis 1:} Domain-specific fine-tuning on human pairwise comparisons will allow DeBERTa-v3-base to match or exceed the accuracy of few-shot LLaMA-3-8B-Instruct, while demonstrating substantially better probability calibration.
+\end{itemize}
+
+\paragraph{RQ2: Non-Content Bias Magnitude and Mitigations.}
+\emph{How sensitive are cross-encoder and bi-encoder preference models to presentation order (positional bias) and response length (verbosity bias)? Which architectural or inference-time mitigations effectively neutralize these shortcuts?}
+\begin{itemize}
+    \item \textbf{Hypothesis 2:} Cross-encoders reading concatenated inputs will exhibit $>10\%$ swap-inconsistency. Training-time swap augmentation will fail to eliminate this bias, whereas inference-time symmetrization will achieve $>99\%$ consistency and improve accuracy. A Siamese bi-encoder will guarantee 100\% order-invariance by mathematical construction without sacrificing accuracy.
+\end{itemize}
+
+\paragraph{RQ3: Soft-Label Distributional Calibration.}
+\emph{Does training on real multi-annotator vote distributions (soft labels) rather than collapsed majority labels improve calibration (ECE) and distributional agreement (KL divergence) on contentious inputs?}
+\begin{itemize}
+    \item \textbf{Hypothesis 3:} Soft-label training on SHP will reduce Expected Calibration Error (ECE) to $<0.05$ on high-disagreement pairs ($0.4 < p_A < 0.6$). While post-hoc temperature scaling will improve top-label accuracy calibration on hard models, only soft-label training will align the model with the true human vote distribution.
+\end{itemize}
+
+% =========================================================================
+% 3. THEORETICAL FOUNDATIONS
+% =========================================================================
+\section{Theoretical Foundations}
+
+\subsection{The Bradley-Terry Preference Formulation}
+The standard framework for paired comparisons is the **Bradley-Terry (BT) model** \citep{bradley1952rank}. Let $r^*(x, y) \in \mathbb{R}$ represent the true latent utility of response $y$ given prompt $x$. Under random utility theory (Thurstone's Law of Comparative Judgment), the observed utility is perturbed by independent Gumbel-distributed noise $\epsilon$:
+\begin{equation}
+    U(x, y) = r^*(x, y) + \epsilon
+\end{equation}
+The probability that response $A$ is chosen over response $B$ is the probability that $U(x, y_A) > U(x, y_B)$. Because the difference between two independent Gumbel variables follows a standard logistic distribution, we obtain:
+\begin{equation}
+    P(y_A \succ y_B \mid x) = \frac{e^{r^*(x, y_A)}}{e^{r^*(x, y_A)} + e^{r^*(x, y_B)}} = \sigma\big(r^*(x, y_A) - r^*(x, y_B)\big)
+\end{equation}
+where $\sigma(z) = \frac{1}{1 + e^{-z}}$.
+
+\subsection{Cross-Encoder vs.\ Bi-Encoder Architecture}
+In preference modeling, two architectural paradigms exist:
+\begin{enumerate}
+    \item \textbf{Cross-Encoder (Joint Attention):}
+    \begin{equation}
+        \text{Input} = \texttt{[CLS]} \circ x \circ \texttt{[SEP]} \circ y_A \circ \texttt{[SEP]} \circ y_B \circ \texttt{[SEP]}
+    \end{equation}
+    The transformer computes full self-attention between every token in prompt $x$, response $y_A$, and response $y_B$ across all layers:
+    \begin{equation}
+        \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+    \end{equation}
+    A classification head on the final $\texttt{[CLS]}$ embedding produces a single logit $z \in \mathbb{R}$, yielding $p_A = \sigma(z)$. Cross-encoders allow fine-grained side-by-side contrastive attention, but their asymmetric input ordering allows the model to learn positional shortcuts.
+    
+    \item \textbf{Bi-Encoder (Siamese Architecture):}
+    A shared encoder independently encodes $(x, y_A)$ and $(x, y_B)$:
+    \begin{equation}
+        s(x, y_A) = \mathbf{w}^T \cdot \text{Encoder}(x, y_A), \quad s(x, y_B) = \mathbf{w}^T \cdot \text{Encoder}(x, y_B)
+    \end{equation}
+    The preference probability is computed strictly from the scalar difference:
+    \begin{equation}
+        p_A = \sigma\big(s(x, y_A) - s(x, y_B)\big)
+    \end{equation}
+    Because swapping $y_A$ and $y_B$ negates the scalar margin $s(x, y_B) - s(x, y_A) = -(s(x, y_A) - s(x, y_B))$, the bi-encoder is \textbf{strictly order-invariant by mathematical construction}.
+\end{enumerate}
+
+\subsection{Hard Binary Loss vs.\ Soft Distributional Loss}
+Standard datasets collapse multi-annotator votes into a binary majority label $y \in \{0, 1\}$. The Binary Cross-Entropy (BCE) loss is:
+\begin{equation}
+    \mathcal{L}_{\text{hard}}(\theta) = -\big[y \log \hat{p} + (1 - y) \log(1 - \hat{p})\big]
+\end{equation}
+The gradient with respect to logit $z$ is:
+\begin{equation}
+    \frac{\partial \mathcal{L}_{\text{hard}}}{\partial z} = \hat{p} - y
+\end{equation}
+When an issue is split 60/40 among annotators, the ground truth is collapsed to $y = 1.0$. If the model correctly predicts $\hat{p} = 0.60$, the gradient magnitude is $|0.60 - 1.0| = 0.40$, forcefully pushing the parameters toward extreme saturation ($z \to \infty, \hat{p} \to 1.0$).
+
+In contrast, our **Soft Binary Cross-Entropy Loss** takes the real collective vote share $q = \frac{\text{score}_A}{\text{score}_A + \text{score}_B} \in (0, 1)$:
+\begin{equation}
+    \mathcal{L}_{\text{soft}}(\theta) = -\big[q \log \hat{p} + (1 - q) \log(1 - \hat{p})\big] = D_{\text{KL}}(Q \parallel P) + \mathcal{H}(Q)
+\end{equation}
+The gradient becomes:
+\begin{equation}
+    \frac{\partial \mathcal{L}_{\text{soft}}}{\partial z} = \hat{p} - q
+\end{equation}
+When the model predicts $\hat{p} = q = 0.60$, the gradient is \textbf{identically zero}. The model receives zero optimization penalty for expressing calibrated human disagreement.
+
+\subsection{Expected Calibration Error (ECE) and Temperature Scaling}
+Let predictions $\hat{p}_i \in [0, 1]$ be partitioned into $M = 15$ equally spaced confidence bins $B_1, \dots, B_M$. The Expected Calibration Error is defined as:
+\begin{equation}
+    \text{ECE} = \sum_{m=1}^{M} \frac{|B_m|}{N} \Big| \text{acc}(B_m) - \text{conf}(B_m) \Big|
+\end{equation}
+where $\text{acc}(B_m)$ is empirical accuracy and $\text{conf}(B_m)$ is average predicted confidence in bin $m$.
+
+**Temperature Scaling** \citep{guo2017calibration} is a post-hoc calibration technique that optimizes a single positive scalar $T > 0$ on the validation set to minimize negative log-likelihood (NLL):
+\begin{equation}
+    \hat{p}_{\text{cal}} = \sigma\left(\frac{z}{T}\right)
+\end{equation}
+Because $T$ is a strictly monotonic scaling of logit $z$, the classification boundary ($\hat{p} \ge 0.5$) and AUC-ROC are mathematically invariant to temperature scaling.
+
+% =========================================================================
+% 4. DATASETS AND TOKEN BUDGETING
+% =========================================================================
+\section{Datasets and Token Budgeting}
+
+\subsection{Dataset Summary}
+We evaluate all models on two public human preference datasets:
+\begin{enumerate}
+    \item \textbf{Anthropic HH-RLHF} \citep{bai2022training}: 169K comparisons of dialogues between humans and an AI assistant. The helpful subsets provide 111,311 training pairs, 5,997 validation pairs, and 6,194 test pairs. The harmless subset (44,729 pairs) is reserved for cross-domain evaluation.
+    \item \textbf{Stanford Human Preferences (SHP)} \citep{ethayarajh2022understanding}: 385K Reddit post pairs across 18 diverse subreddits. Each pair carries collective human upvote tallies ($s_A, s_B$).
+\end{enumerate}
+
+\subsection{Positional Randomization & IAA Quality Gating}
+To prevent models from exploiting superficial dataset artifacts, we implement two data gates:
+\begin{itemize}
+    \item \textbf{A/B Coin-Flip Randomization:} In raw HH-RLHF, the preferred response is stored under \texttt{chosen}. If mapped naively to Option A, a model achieves high accuracy by simply predicting A. We apply a deterministic 50\% coin flip (seed 42) to assign \texttt{chosen} to A or B, guaranteeing an exact 50.0\% / 50.0\% label balance.
+    \item \textbf{SHP Inter-Annotator Agreement (IAA) Quality Gate:} Low-vote comparisons often reflect noise rather than consensus. For SHP training, pairs must pass:
+    \begin{equation}
+        s_A + s_B \ge 20, \quad |s_A - s_B| \ge 10, \quad \kappa_{\text{proxy}} = 2 \cdot |p_A - 0.5| \ge 0.20
+    \end{equation}
+    This filters training data to 72,216 high-signal pairs. The test split (18,406 pairs) remains \textbf{completely ungated}, retaining 3,744 high-disagreement pairs ($0.4 < p_A < 0.6$) for evaluation.
+\end{itemize}
+
+\subsection{Strict Token Budgeting (512-Token Cap)}
+Transformer encoders possess a 512-token context limit. Concatenating prompt and two responses requires an explicit budget:
+\begin{equation}
+    \underbrace{128}_{\text{Prompt } x \text{ (left-truncated)}} + \underbrace{190}_{\text{Resp } A \text{ (right-truncated)}} + \underbrace{190}_{\text{Resp } B \text{ (right-truncated)}} + \underbrace{4}_{\text{Special tokens}} = \mathbf{512}
+\end{equation}
+Left-truncation on prompt $x$ preserves the final user instruction (the most relevant conversational context).
+
+% =========================================================================
+% 5. MODEL CASCADE
+% =========================================================================
+\section{Model Cascade Architecture}
+
+We evaluate seven model tiers spanning distinct architectural paradigms:
+\begin{itemize}
+    \item \textbf{T0 Length Heuristic:} Logistic regression on log-length ratio $\log\frac{|y_A|+1}{|y_B|+1}$ with no intercept ($b = 0$). Measures baseline accuracy achievable purely from verbosity.
+    \item \textbf{T0 TF-IDF Difference Baseline:} Logistic regression ($b = 0$) on sublinear TF-IDF difference vectors $\Delta \mathbf{f} = \mathbf{f}(x, y_A) - \mathbf{f}(x, y_B)$ over 10K n-grams. Guarantees 100\% swap consistency by anti-symmetry.
+    \item \textbf{T1 BiLSTM (Siamese \& Cross):} A 2-layer bidirectional LSTM (256 hidden, attention pooling, 10.7M parameters) trained from scratch on BERT WordPiece tokens.
+    \item \textbf{T2 BERT-Base Cross-Encoder:} Pretrained \texttt{bert-base-uncased} (110M parameters) with joint self-attention and a linear head on $\texttt{[CLS]}$.
+    \item \textbf{T3 DeBERTa-v3-base Cross-Encoder:} Pretrained \texttt{microsoft/deberta-v3-base} (184M parameters) featuring disentangled relative position attention and enhanced mask decoding.
+    \item \textbf{T5 BERT Bi-Encoder:} Shared BERT-base backbone scoring $s(x, y_A)$ and $s(x, y_B)$ separately, producing $p_A = \sigma(s_A - s_B)$.
+    \item \textbf{T6 LLaMA-3-8B Judge:} Off-the-shelf \texttt{meta-llama/Meta-Llama-3-8B-Instruct} evaluated 3-shot with alternating demonstration labels.
+\end{itemize}
+
+% =========================================================================
+% 6. EMPIRICAL RESULTS AND ANALYSIS
+% =========================================================================
+\section{Empirical Results and Analysis}
+
+\subsection{Master Results on Anthropic HH-RLHF (RQ1)}
+
+Table~\ref{tab:main} presents the primary benchmark on 6,194 held-out HH-RLHF helpful test pairs. All paired comparisons use a paired bootstrap test with 2,000 resamples.
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{llrcccccc}
+\toprule
+\textbf{Tier} & \textbf{Model} & \textbf{Params} & \textbf{Accuracy [95\% CI]} & \textbf{Acc.\ \sym} & \textbf{AUC} & \textbf{ECE} & \textbf{Swap Cons.} & \textbf{Harmless} \\
+\midrule
+T0 & Length Only & 1 & 55.6 [54.3, 56.8] & 55.6 & 0.590 & 0.020 & 0.981 & 42.2\% \\
+T0 & TF-IDF + LogReg & 10K & 60.3 [59.1, 61.6] & 60.3 & 0.656 & 0.016 & 0.996 & 38.5\% \\
+T1 & BiLSTM Cross & 11M & 61.7 [60.6, 62.9] & 62.2 & 0.676 & 0.024 & 0.776 & 37.3\% \\
+T1 & BiLSTM Siamese & 11M & 63.0 [61.9, 64.3] & 63.0 & 0.686 & 0.012 & 0.999 & 36.1\% \\
+T2 & BERT Cross & 110M & 63.6 [62.4, 64.8] & 64.6 & 0.706 & 0.022 & 0.773 & 35.2\% \\
+T2 & BERT (3-Seed Ens.) & 330M & 64.4 [63.2, 65.8] & 65.1 & 0.714 & 0.024 & 0.815 & 34.6\% \\
+T5 & BERT Bi-Encoder & 110M & 64.6 [63.4, 65.9] & 64.6 & 0.711 & 0.023 & 0.997 & 34.3\% \\
+T3 & DeBERTa-v3 Cross & 184M & 65.8 [64.6, 67.0] & 66.8 & 0.726 & 0.064 & 0.817 & 34.6\% \\
+T3 & DeBERTa (3-Seed Ens.) & 552M & \textbf{66.5} [65.4, 67.7] & \textbf{67.5} & \textbf{0.736} & 0.039 & 0.862 & 33.8\% \\
+T6 & LLaMA-3-8B Judge & 8B & 61.9 [60.8, 63.1] & 63.6 & 0.670 & 0.313 & 0.601 & \textbf{52.6\%} \\
+\bottomrule
+\end{tabular}
+\caption{Master benchmark on HH-RLHF helpful test set (6,194 pairs). \textbf{Acc.\ \sym}: Accuracy after inference-time swap-averaging. \textbf{Swap Cons.}: Fraction of decisions that follow an A/B swap. \textbf{Harmless}: Out-of-domain accuracy on 44,729 harmlessness pairs.}
+\label{tab:main}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/fig1_accuracy_ladder.pdf}
+    \caption{Accuracy progression across model tiers on HH-RLHF helpful test set. Circles represent raw accuracy; diamonds represent symmetrized inference.}
+    \label{fig:ladder}
+\end{figure}
+
+\paragraph{Key Insight (RQ1):} The fine-tuned DeBERTa-v3 ensemble outperforms the 8-Billion parameter LLaMA-3 judge by \textbf{+4.7 percentage points} ($p < 0.001$) and exhibits an order of magnitude lower calibration error ($\text{ECE} = 0.039$ vs.\ $0.313$). Domain-specific reward modeling decisively beats off-the-shelf LLM prompting.
+
+\subsection{Positional Bias and Inference Symmetrization (RQ2)}
+
+Figure~\ref{fig:swap} illustrates the swap consistency across architectures. Cross-encoders reading concatenated text exhibit severe order sensitivity: BERT flips its decision on 22.7\% of pairs, and DeBERTa flips on 18.3\% of pairs. The LLaMA-3 judge collapses to 60.1\% consistency, exhibiting an extreme $+0.31$ bias toward Option A.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/fig2_swap_consistency.pdf}
+    \caption{Swap consistency across model tiers. Dashed line indicates project target ($>90\%$).}
+    \label{fig:swap}
+\end{figure}
+
+\paragraph{Training Augmentation vs.\ Inference Symmetrization:}
+Training BERT with randomly swapped copies (\texttt{swap\_prob=0.5}) fails to eliminate positional bias ($0.77 \to 0.79$ consistency, $p = 0.10$, n.s.). In contrast, **inference-time symmetrization** ($p_{\sym} = \frac{1}{2}(p_{AB} + 1 - p_{BA})$) achieves 99.9\% consistency and boosts accuracy by $+1.0$ to $+1.1$ points ($p < 0.05$). The BERT bi-encoder achieves 64.6\% accuracy while being 100\% order-invariant by construction.
+
+\subsection{Verbosity Bias: The Test B Compression Study (RQ2)}
+
+To isolate length from quality, we used Qwen2.5-7B-Instruct to compress the preferred response by 40\% across 500 test pairs while preserving 100\% of content, facts, and tone. Table~\ref{tab:testb} summarizes the results.
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Original Acc (\%)} & \textbf{Compressed Acc (\%)} & \textbf{Prefers Longer (\%)} & \textbf{Prefers Padded (\%)} \\
+\midrule
+BERT Cross & 75.2 & 68.0 & 66.0 & 41.0 \\
+BERT + Swap Aug. & 71.2 & 68.0 & 59.0 & 50.0 \\
+BERT No-Prompt & 73.0 & 69.6 & 61.0 & 44.0 \\
+BERT Bi-Encoder & 74.2 & 67.2 & 68.0 & 44.0 \\
+DeBERTa Cross & 74.4 & 68.8 & 63.0 & 55.0 \\
+DeBERTa + Swap Aug. & 73.0 & 65.6 & 63.0 & 48.0 \\
+\bottomrule
+\end{tabular}
+\caption{Test B evaluation on 500 length-perturbed pairs. \textbf{Prefers Longer}: \% of identical-content pairs where the model chooses the longer text. \textbf{Prefers Padded}: \% choosing filler-padded responses.}
+\label{tab:testb}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/fig5_length_bias_test_b.pdf}
+    \caption{Percentage of same-content pairs in which models prefer the longer uncompressed response.}
+    \label{fig:testb}
+\end{figure}
+
+\paragraph{Key Insight:} Compressing the superior response drops model accuracy by 3 to 7 percentage points. When presented with identical content, models choose the longer variant 59\% to 68\% of the time. Interestingly, appending content-free padding does not increase preference (41--55\%), indicating that reward models possess a specific bias toward **content-bearing verbosity** rather than raw character counts.
+
+\subsection{Soft-Label Calibration on SHP (RQ3)}
+
+Table~\ref{tab:soft} and Figure~\ref{fig:reliability} compare models trained on hard majority labels versus continuous soft vote fractions on the 18,406 SHP test pairs.
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{llccccc}
+\toprule
+\textbf{Architecture} & \textbf{Supervision} & \textbf{Accuracy (\%)} & \textbf{ECE} & \textbf{KL to Human} & \textbf{ECE$_{\text{HD}}$} & \textbf{KL$_{\text{HD}}$} \\
+\midrule
+\multirow{3}{*}{BiLSTM} & Hard Labels & 66.3 & 0.068 & 0.206 & 0.102 & 0.183 \\
+& Hard + Temp Scale & 66.3 & 0.014 & 0.133 & 0.033 & -- \\
+& Soft Labels & 66.6 & 0.021 & \textbf{0.126} & 0.033 & \textbf{0.063} \\
+\midrule
+\multirow{3}{*}{BERT} & Hard Labels & 68.0 & 0.062 & 0.205 & 0.098 & 0.189 \\
+& Hard + Temp Scale & 68.0 & 0.014 & 0.137 & 0.045 & 0.092 \\
+& Soft Labels & \textbf{68.7} & 0.021 & \textbf{0.131} & 0.046 & \textbf{0.086} \\
+\midrule
+\multirow{3}{*}{DeBERTa-v3} & Hard Labels & 69.9 & 0.109 & 0.339 & 0.153 & 0.384 \\
+& Hard + Temp Scale & 69.9 & 0.015 & 0.148 & 0.051 & 0.122 \\
+& Soft Labels & \textbf{70.1} & 0.024 & \textbf{0.137} & 0.048 & \textbf{0.105} \\
+\bottomrule
+\end{tabular}
+\caption{Stanford Human Preferences (SHP) test results (18,406 pairs). \textbf{HD}: The 3,744 high-disagreement pairs ($0.4 < p_A < 0.6$). \textbf{KL}: Bernoulli divergence from empirical human upvote shares.}
+\label{tab:soft}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/fig3_reliability_shp.pdf}
+    \caption{Reliability diagrams on SHP test for BERT and DeBERTa under hard labels, temperature scaling, and soft labels. The diagonal dashed line denotes perfect empirical calibration.}
+    \label{fig:reliability}
+\end{figure}
+
+\paragraph{Key Insight (RQ3):} Soft-label supervision cuts ECE by $3\times$ to $4.5\times$ and reduces divergence from human vote distributions by 36\% to 60\% across all architectures ($p < 0.001$). While temperature scaling on hard models repairs top-1 calibration error, **it fails to match the human vote distribution** on split decisions (KL 0.137 vs.\ 0.148, $p < 0.001$).
+
+\subsection{Cross-Domain Shift: Helpful vs.\ Harmless Anti-Correlation}
+
+Evaluating helpfulness-trained models on 44,729 harmlessness prompts reveals a catastrophic collapse: accuracy plummets to **33.8\% -- 35.2\%** (significantly below random chance, Table~\ref{tab:main}). Conversely, a model trained on harmless pairs achieves 69.6\% on harmless test pairs but collapses to 42.0\% on helpful pairs. 
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/fig6_domain_shift.pdf}
+    \caption{Performance collapse under cross-domain transfer between helpfulness and harmlessness.}
+    \label{fig:shift}
+\end{figure}
+
+\paragraph{Reason for Collapse:} On harmlessness prompts, human preference rewards safe, concise refusal of toxic queries. On helpfulness prompts, models are trained to reward detailed, expansive answers. Consequently, helpfulness reward models systematically prefer the toxic, detailed completion over the safe refusal!
+
+% =========================================================================
+% 7. CROSS-BIAS INTERACTIONS
+% =========================================================================
+\section{Cross-Bias Interactions}
+
+A central scientific contribution of our work is examining how mitigating one bias perturbs other dimensions of reliability:
+\begin{enumerate}
+    \item \textbf{Symmetrization $\longleftrightarrow$ Calibration:} Symmetrizing predictions at inference ($p_{\sym} = \frac{1}{2}(p_{AB} + 1 - p_{BA})$) acts as a two-model miniature ensemble over input permutations. This reduces epistemic variance, producing an automatic reduction in ECE (0.064 $\to$ 0.039 on DeBERTa).
+    \item \textbf{Soft Labels $\longleftrightarrow$ Length Shortcut:} Because soft-label loss does not penalize moderate predictions ($\hat{p} \approx 0.60$), gradient descent faces less pressure to exploit superficial shortcuts. Length correlation drops from $r = 0.35$ in hard BERT to $r = 0.23$ in soft DeBERTa.
+    \item \textbf{Temperature Scaling $\longleftrightarrow$ Positional Drift:} Temperature scaling preserves binary swap consistency but compresses the continuous positional drift $|p_{\text{fwd}} - (1 - p_{\text{swap}})|$, stabilizing downstream RLHF gradient updates.
+\end{enumerate}
+
+% =========================================================================
+% 8. CONCLUSION AND RECOMMENDATIONS
+% =========================================================================
+\section{Conclusion and Practical Recommendations}
+
+This project conducted a systematic audit of pairwise preference modeling across seven model tiers, three biases, and two public datasets. Our primary conclusions are:
+\begin{itemize}
+    \item \textbf{Recommendation 1: Always Symmetrize at Inference.} Running cross-encoders in both orders and averaging logits costs a second forward pass but eliminates positional bias and adds $+1.0\%$ accuracy. Alternatively, deploy Siamese bi-encoders for zero position bias by design.
+    \item \textbf{Recommendation 2: Train on Vote Distributions When Available.} Soft-label training on collective human vote shares drastically improves calibration and aligns model confidence with true human ambiguity without hurting accuracy.
+    \item \textbf{Recommendation 3: Separate Helpful and Harmless Reward Signals.} Due to opposing optimization incentives, a single reward model cannot reliably govern both helpfulness and safety.
+\end{itemize}
+
+\newpage
+\bibliographystyle{acl_natbib}
+\bibliography{references}
+
+\end{document}
