@@ -17,6 +17,4 @@ report/*.out
 report/*.toc
 report/*.synctex.gz
 *.zip
-!project_report_latex.zip
-!report/project_report_latex.zip
 venv
